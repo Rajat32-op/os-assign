@@ -8,6 +8,8 @@
 
 struct spinlock tickslock;
 uint ticks;
+int quantum[4]={2,4,8,16};
+extern struct proc proc[NPROC];
 
 extern char trampoline[], uservec[];
 
@@ -81,8 +83,20 @@ usertrap(void)
     kexit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
-    yield();
+  if(which_dev == 2){
+    p->ticks_used++;
+    p->ticks_consumed_per_level[p->mlfq_level]+=1;
+
+    if(p->ticks_used>=quantum[p->mlfq_level]){
+      int delta_s=p->syscount-p->syscall_timeslice_start;
+      int delta_t=p->ticks_used;
+      if(delta_s<delta_t){
+        p->mlfq_level=(p->mlfq_level+1<=3?p->mlfq_level+1:3);
+      }
+      p->ticks_used=0;
+      yield();
+    }
+  }
 
   prepare_return();
 
@@ -168,7 +182,19 @@ clockintr()
     acquire(&tickslock);
     ticks++;
     wakeup(&ticks);
+    int do_boost = (ticks > 0 && ticks % 128 == 0);
     release(&tickslock);
+
+    if(do_boost){
+      for(struct proc *p = proc; p < &proc[NPROC]; p++){
+        acquire(&p->lock);
+        if(p->state == RUNNABLE || p->state == RUNNING){
+          p->mlfq_level = 0;
+          p->ticks_used = 0;
+        }
+        release(&p->lock);
+      }
+    }
   }
 
   // ask for the next timer interrupt. this also clears

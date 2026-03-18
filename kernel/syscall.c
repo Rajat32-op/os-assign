@@ -101,6 +101,14 @@ extern uint64 sys_unlink(void);
 extern uint64 sys_link(void);
 extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
+extern uint64 sys_hello(void);
+extern uint64 sys_getpid2(void);
+extern uint64 sys_getppid(void);
+extern uint64 sys_getnumchild(void);
+extern uint64 sys_getsyscount(void);
+extern uint64 sys_getchildsyscount(void);
+extern uint64 sys_getlevel(void);
+extern uint64 sys_getmlfqinfo(void);
 
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
@@ -126,6 +134,14 @@ static uint64 (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_hello]   sys_hello, 
+[SYS_getpid2] sys_getpid2,
+[SYS_getppid] sys_getppid,
+[SYS_getnumchild] sys_getnumchild,
+[SYS_getsyscount] sys_getsyscount,
+[SYS_getchildsyscount] sys_getchildsyscount,
+[SYS_getlevel] sys_getlevel,
+[SYS_getmlfqinfo] sys_getmlfqinfo,
 };
 
 void
@@ -138,6 +154,7 @@ syscall(void)
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
     // Use num to lookup the system call function for num, call it,
     // and store its return value in p->trapframe->a0
+    p->syscount++;
     p->trapframe->a0 = syscalls[num]();
   } else {
     printf("%d %s: unknown sys call %d\n",

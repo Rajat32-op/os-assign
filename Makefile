@@ -145,6 +145,21 @@ UPROGS=\
 	$U/_logstress\
 	$U/_forphan\
 	$U/_dorphan\
+	$U/_hello\
+	$U/_getpid2\
+	$U/_getppid\
+	$U/_getnumchild\
+	$U/_syscount\
+	$U/_test1\
+	$U/_test2\
+	$U/_test3\
+	$U/_test4\
+	$U/_test_cpu\
+	$U/_test_syscall\
+	$U/_test_mixed\
+	$U/_pa2_1\
+	$U/_pa2_2\
+	$U/_pa2_3\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

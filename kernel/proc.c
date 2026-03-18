@@ -20,6 +20,7 @@ static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
 
+int last_index[4]={0};
 // helps ensure that wakeups of wait()ing
 // parents are not lost. helps obey the
 // memory model when using p->parent.
@@ -124,6 +125,12 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+  p->syscount=0;
+  p->mlfq_level=0;
+  p->syscall_timeslice_start=0;
+  p->times_scheduled=0;
+  p->ticks_used=0;
+  for(int i=0;i<4;i++)p->ticks_consumed_per_level[i]=0;
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -438,22 +445,26 @@ scheduler(void)
     intr_off();
 
     int found = 0;
-    for(p = proc; p < &proc[NPROC]; p++) {
-      acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
-
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-        found = 1;
+    for(int level = 0; level < 4 && !found; level++){
+      int start = (last_index[level] + 1) % NPROC;
+      for(int add=0;add<NPROC;add++){
+        int i=(start+add)%NPROC;
+        p = &proc[i];
+        acquire(&p->lock);
+        if(p->mlfq_level == level && p->state == RUNNABLE){
+          p->times_scheduled++;
+          c->proc = p;
+          p->syscall_timeslice_start = p->syscount;
+          p->state = RUNNING;
+          last_index[level] = i;
+          swtch(&c->context, &p->context);
+          c->proc = 0;
+          found = 1;
+          release(&p->lock);
+          break;
+        }
+        release(&p->lock);
       }
-      release(&p->lock);
     }
     if(found == 0) {
       // nothing to run; stop running on this core until an interrupt.

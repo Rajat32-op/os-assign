@@ -104,4 +104,17 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int syscount;                //Number of system calls executed
+  int mlfq_level;
+  int ticks_used;
+  int ticks_consumed_per_level[4];
+  int times_scheduled;
+  int syscall_timeslice_start;
+};
+
+struct mlfqinfo{
+  int level;
+  int ticks[4];
+  int times_scheduled;
+  int total_syscalls;
 };

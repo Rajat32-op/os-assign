@@ -6,6 +6,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "vm.h"
+extern struct proc proc[NPROC];
 
 uint64
 sys_exit(void)
@@ -106,4 +107,102 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+uint64
+sys_hello(void)
+{
+  printf("Hello from the kernel!\n");
+  return 0;
+}
+
+uint64
+sys_getpid2(void){
+  return myproc()->pid;
+}
+
+uint64
+sys_getppid(void)
+{
+  struct proc *parent=myproc()->parent;
+  if(parent!=0){
+    return parent->pid;
+  }
+  
+  return -1;
+}
+
+uint64
+sys_getnumchild(void){
+  struct proc *cur=myproc();
+  struct proc *p;
+  int cnt=0;
+
+  for(p=proc;p<&proc[NPROC];p++){
+    acquire(&p->lock);
+    if(p->parent==cur && p->state!=ZOMBIE && p->state!=UNUSED){
+      cnt++;
+    }
+    release(&p->lock);
+  }
+  return cnt;
+}
+
+uint64
+sys_getsyscount(void){
+  struct proc *cur=myproc();
+  return cur->syscount;
+}
+
+uint64
+sys_getchildsyscount(void){
+  int pid;
+  argint(0,&pid);
+  struct proc *cur=myproc();
+  struct proc *p;
+  for(p=proc;p<&proc[NPROC];p++){
+    acquire(&p->lock);
+    if(p->parent==cur && p->pid==pid){
+      int count=p->syscount;
+      release(&p->lock);
+      return count;
+    }
+    release(&p->lock);
+  }
+  return -1;
+}
+
+uint64 sys_getlevel(void){
+  return myproc()->mlfq_level;
+}
+
+uint64 sys_getmlfqinfo(void){
+  int pid;
+  argint(0,&pid);
+  struct mlfqinfo info;
+  uint64 adress;
+  argaddr(1,&adress);
+
+  struct proc *p;
+  for(p=proc;p<&proc[NPROC];p++){
+    acquire(&p->lock);
+    if(p->pid==pid){
+      info.level=p->mlfq_level;
+      info.total_syscalls=p->syscount;
+      for(int i=0;i<4;i++){
+        info.ticks[i]=p->ticks_consumed_per_level[i];
+      }
+      info.times_scheduled=p->times_scheduled;
+      int res=copyout(myproc()->pagetable,adress,(char *)&info,sizeof(info));
+      release(&p->lock);
+      if(res==-1){
+        printf("Error occured during copying result from kernel space to user space\n");
+        return -1;
+      }
+      return 0;
+    }
+    release(&p->lock);
+  }
+  printf("PID not found\n");
+  return -1;
 }
