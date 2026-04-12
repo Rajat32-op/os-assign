@@ -198,21 +198,27 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
   if((va % PGSIZE) != 0)
     panic("uvmunmap: not aligned");
 
-  for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
-    if((pte = walk(pagetable, a, 0)) == 0) // leaf page table entry allocated?
-      continue;   
-    if((*pte & PTE_V) == 0)  // has physical page been allocated?
+  for(a=va;a<va+npages*PGSIZE;a+=PGSIZE){
+    if((pte=walk(pagetable,a,0))==0)continue;
+
+    if(!(*pte & PTE_V) &&(*pte & PTE_SWAP)){
+      if(do_free)swap_free(PTE_SWAP_SLOT(*pte));
+      *pte = 0;
       continue;
+    }
+
+    if((*pte & PTE_V) == 0)
+      continue;
+
     if(do_free){
       uint64 pa = PTE2PA(*pte);
+      frame_remove(pa);
       kfree((void*)pa);
     }
     *pte = 0;
   }
 }
 
-// Allocate PTEs and physical memory to grow a process from oldsz to
-// newsz, which need not be page aligned.  Returns new size or 0 on error.
 uint64
 uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
 {
@@ -224,6 +230,13 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
 
   oldsz = PGROUNDUP(oldsz);
   for(a = oldsz; a < newsz; a += PGSIZE){
+    while(frames_full()) {
+        if(clock_evict() == 0) break;
+    }
+    if(frames_full()) {
+      uvmdealloc(pagetable, a, oldsz);
+      return 0;
+    }
     mem = kalloc();
     if(mem == 0){
       uvmdealloc(pagetable, a, oldsz);
@@ -234,6 +247,11 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
       kfree(mem);
       uvmdealloc(pagetable, a, oldsz);
       return 0;
+    }
+    struct proc *p = myproc();
+    if(p) {
+        frame_add(p, a, (uint64)mem);
+        p->resident_pages++;
     }
   }
   return newsz;
@@ -308,6 +326,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       continue;   // physical page hasn't been allocated
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
+    while(frames_full()) clock_evict();
     if((mem = kalloc()) == 0)
       goto err;
     memmove(mem, (char*)pa, PGSIZE);
@@ -452,24 +471,58 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 uint64
 vmfault(pagetable_t pagetable, uint64 va, int read)
 {
-  uint64 mem;
-  struct proc *p = myproc();
+    struct proc *p = myproc();
 
-  if (va >= p->sz)
-    return 0;
-  va = PGROUNDDOWN(va);
-  if(ismapped(pagetable, va)) {
-    return 0;
-  }
-  mem = (uint64) kalloc();
-  if(mem == 0)
-    return 0;
-  memset((void *) mem, 0, PGSIZE);
-  if (mappages(p->pagetable, va, PGSIZE, mem, PTE_W|PTE_U|PTE_R) != 0) {
-    kfree((void *)mem);
-    return 0;
-  }
-  return mem;
+    if (va >= p->sz)return 0;
+    va = PGROUNDDOWN(va);
+    pte_t *pte = walk(pagetable, va, 0);
+
+    if (pte != 0 && !(*pte & PTE_V) && (*pte & PTE_SWAP)) {
+        int slot=PTE_SWAP_SLOT(*pte);
+
+        while (frames_full()) {
+            if(clock_evict() == 0) break;
+        }
+        if (frames_full()) return 0;
+
+        char *mem=kalloc();
+        if (mem == 0) return 0;
+        swap_read(slot, mem);
+        swap_free(slot);
+
+        *pte = PA2PTE((uint64)mem) | PTE_R | PTE_W | PTE_U | PTE_V;
+        sfence_vma();
+
+        frame_add(p, va, (uint64)mem);
+        p->page_faults++;
+        p->pages_swapped_in++;
+        p->resident_pages++;
+        return (uint64)mem;
+    }
+
+    if (ismapped(pagetable, va))return 0;
+
+    while (frames_full()) {
+        if(clock_evict() == 0) break;
+    }
+    if (frames_full()) return 0;
+
+    char *mem = kalloc();
+    if (mem == 0) return 0;
+
+    memset(mem, 0, PGSIZE);
+    if (mappages(p->pagetable, va, PGSIZE, (uint64)mem,PTE_W | PTE_U | PTE_R) != 0) {
+        kfree(mem);
+        return 0;
+    }
+
+    pte=walk(pagetable, va, 0);
+    if(pte) *pte|=PTE_A;
+
+    frame_add(p,va,(uint64)mem);
+    p->page_faults++;
+    p->resident_pages++;
+    return (uint64)mem;
 }
 
 int

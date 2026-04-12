@@ -206,3 +206,28 @@ uint64 sys_getmlfqinfo(void){
   printf("PID not found\n");
   return -1;
 }
+
+uint64 sys_getvmstats(void) {
+    int pid;
+    uint64 addr;
+    argint(0,&pid);
+    argaddr(1,&addr);
+
+    struct vmstats info;
+    struct proc *p;
+
+    for (p=proc;p<&proc[NPROC];p++) {
+        acquire(&p->lock);
+        if(p->pid==pid){
+            info.page_faults=p->page_faults;
+            info.pages_evicted=p->pages_evicted;
+            info.pages_swapped_in=p->pages_swapped_in;
+            info.pages_swapped_out=p->pages_swapped_out;
+            info.resident_pages=p->resident_pages;
+            release(&p->lock);
+            return copyout(myproc()->pagetable,addr,(char*)&info,sizeof(info));
+        }
+        release(&p->lock);
+    }
+    return -1;
+}

@@ -5,7 +5,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
-
+#include "swap.h"
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -131,6 +131,11 @@ found:
   p->times_scheduled=0;
   p->ticks_used=0;
   for(int i=0;i<4;i++)p->ticks_consumed_per_level[i]=0;
+  p->pages_evicted = 0;
+  p->pages_swapped_out = 0;
+  p->pages_swapped_in = 0;
+  p->resident_pages = 0;
+  p->page_faults = 0;
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -162,6 +167,14 @@ found:
 static void
 freeproc(struct proc *p)
 {
+   frame_remove_proc(p);
+    acquire(&swap_lock);
+    for (int i = 0; i < NSWAP; i++) {
+        if (swap_table[i].in_use && swap_table[i].pid==p->pid) {
+            swap_table[i].in_use=0;
+        }
+    }
+    release(&swap_lock);
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;

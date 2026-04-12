@@ -110,6 +110,11 @@ struct proc {
   int ticks_consumed_per_level[4];
   int times_scheduled;
   int syscall_timeslice_start;
+  int page_faults;
+  int pages_evicted;
+  int pages_swapped_in;
+  int pages_swapped_out;
+  int resident_pages;
 };
 
 struct mlfqinfo{
@@ -117,4 +122,12 @@ struct mlfqinfo{
   int ticks[4];
   int times_scheduled;
   int total_syscalls;
+};
+
+struct vmstats {
+    int page_faults;
+    int pages_evicted;
+    int pages_swapped_in;
+    int pages_swapped_out;
+    int resident_pages;
 };

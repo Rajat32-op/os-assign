@@ -59,6 +59,12 @@ void            ireclaim(int);
 void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
+void            frameinit(void);
+void            frame_add(struct proc*, uint64, uint64);
+void            frame_remove(uint64);
+void            frame_remove_proc(struct proc*);
+int             frames_full(void);
+uint64          clock_evict(void);
 
 // log.c
 void            initlog(int, struct superblock*);
@@ -127,6 +133,13 @@ char*           safestrcpy(char*, const char*, int);
 int             strlen(const char*);
 int             strncmp(const char*, const char*, uint);
 char*           strncpy(char*, const char*, int);
+
+//swap.c
+void     swapinit(void);
+int      swap_alloc(int, uint64);
+void     swap_free(int);
+void     swap_write(int, char*);
+void     swap_read(int, char*);
 
 // syscall.c
 void            argint(int, int*);

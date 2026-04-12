@@ -1,3 +1,6 @@
+#ifndef RISCV_H
+#define RISCV_H
+
 #ifndef __ASSEMBLER__
 
 // which hart (core) is this?
@@ -378,3 +381,12 @@ typedef uint64 *pagetable_t; // 512 PTEs
 // Sv39, to avoid having to sign-extend virtual addresses
 // that have the high bit set.
 #define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
+
+#define PTE_A    (1L << 6)   // Access bit — hardware sets this on access
+#define PTE_SWAP (1L << 8)   // Our marker: PTE_V=0 but page is in swap
+
+// Encode/decode swap slot into the PPN field of an invalid PTE
+#define MAKE_SWAP_PTE(slot)   (((uint64)(slot) << 10) | PTE_SWAP)
+#define PTE_SWAP_SLOT(pte)    ((int)((pte) >> 10))
+
+#endif
