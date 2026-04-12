@@ -7,6 +7,9 @@ struct buf {
   uint refcnt;
   struct buf *prev; // LRU cache list
   struct buf *next;
+  int _is_write;
+  int priority;
+  struct buf *qnext; // disk queue
   uchar data[BSIZE];
 };
 

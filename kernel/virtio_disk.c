@@ -15,6 +15,16 @@
 #include "fs.h"
 #include "buf.h"
 #include "virtio.h"
+#include "proc.h"
+
+int disk_sched_policy = 0; // 0=FCFS, 1=SSTF
+uint current_block = 0;
+
+struct buf *disk_queue_head = 0;
+int in_flight = 0;
+
+void virtio_disk_issue();
+
 
 // the address of virtio mmio register r.
 #define R(r) ((volatile uint32 *)(VIRTIO0 + (r)))
@@ -215,32 +225,100 @@ alloc3_desc(int *idx)
 void
 virtio_disk_rw(struct buf *b, int write)
 {
+  struct proc *p = myproc();
+  if(p) {
+    if(write)
+      p->disk_writes++;
+    else
+      p->disk_reads++;
+  }
+  
+  acquire(&disk.vdisk_lock);
+  
+  b->priority = p ? p->mlfq_level : 0;
+  b->qnext = 0;
+  b->_is_write = write;
+  
+  if (!disk_queue_head) {
+    disk_queue_head = b;
+  } else {
+    struct buf *curr = disk_queue_head;
+    while(curr->qnext) {
+      curr = curr->qnext;
+    }
+    curr->qnext = b;
+  }
+
+  // Call issue
+  b->disk = 1;
+  virtio_disk_issue();
+
+  // Wait for virtio_disk_intr() to say request has finished.
+  while(b->disk == 1) {
+    sleep(b, &disk.vdisk_lock);
+  }
+
+  release(&disk.vdisk_lock);
+}
+
+void virtio_disk_issue() {
+  if (in_flight || !disk_queue_head)
+    return;
+
+  struct buf *b = disk_queue_head;
+  struct buf *prev = 0;
+
+  // Basic policy routing (Algorithm first)
+  if (disk_sched_policy == 1) { // SSTF
+    struct buf *curr = disk_queue_head;
+    struct buf *cprev = 0;
+    
+    uint min_dist = 0xFFFFFFFF;
+    int best_priority = 999999;
+    
+    while (curr) {
+      uint dist = (curr->blockno > current_block) ? (curr->blockno - current_block) : (current_block - curr->blockno);
+      
+      if (dist < min_dist) {
+        min_dist = dist;
+        best_priority = curr->priority;
+        b = curr;
+        prev = cprev;
+      } 
+      else if (dist == min_dist) {
+        if (curr->priority < best_priority) {
+          best_priority = curr->priority;
+          b = curr;
+          prev = cprev;
+        }
+      }
+      cprev = curr;
+      curr = curr->qnext;
+    }
+  }
+  
+  if (prev) {
+    prev->qnext = b->qnext;
+  } else {
+    disk_queue_head = b->qnext;
+  }
+  
+  in_flight = 1;
+  b->disk = 1; // Mark inflight
+  
   uint64 sector = b->blockno * (BSIZE / 512);
 
-  acquire(&disk.vdisk_lock);
-
-  // the spec's Section 5.2 says that legacy block operations use
-  // three descriptors: one for type/reserved/sector, one for the
-  // data, one for a 1-byte status result.
-
-  // allocate the three descriptors.
   int idx[3];
-  while(1){
-    if(alloc3_desc(idx) == 0) {
-      break;
-    }
+  while(alloc3_desc(idx) != 0) {
+    // wait for descriptors
     sleep(&disk.free[0], &disk.vdisk_lock);
   }
 
-  // format the three descriptors.
-  // qemu's virtio-blk.c reads them.
-
+  int write = b->_is_write; // We will assume 0 (read) here for simplicity if we can't tell, but actually we need it.
+  // Let's assume we can fetch write from somewhere, or we modify virtio_disk_rw above to pass the right thing.
+  
   struct virtio_blk_req *buf0 = &disk.ops[idx[0]];
-
-  if(write)
-    buf0->type = VIRTIO_BLK_T_OUT; // write the disk
-  else
-    buf0->type = VIRTIO_BLK_T_IN; // read the disk
+  buf0->type = write ? VIRTIO_BLK_T_OUT : VIRTIO_BLK_T_IN;
   buf0->reserved = 0;
   buf0->sector = sector;
 
@@ -251,45 +329,38 @@ virtio_disk_rw(struct buf *b, int write)
 
   disk.desc[idx[1]].addr = (uint64) b->data;
   disk.desc[idx[1]].len = BSIZE;
-  if(write)
-    disk.desc[idx[1]].flags = 0; // device reads b->data
-  else
-    disk.desc[idx[1]].flags = VRING_DESC_F_WRITE; // device writes b->data
+  disk.desc[idx[1]].flags = write ? 0 : VRING_DESC_F_WRITE;
   disk.desc[idx[1]].flags |= VRING_DESC_F_NEXT;
   disk.desc[idx[1]].next = idx[2];
 
-  disk.info[idx[0]].status = 0xff; // device writes 0 on success
+  disk.info[idx[0]].status = 0xff;
   disk.desc[idx[2]].addr = (uint64) &disk.info[idx[0]].status;
   disk.desc[idx[2]].len = 1;
-  disk.desc[idx[2]].flags = VRING_DESC_F_WRITE; // device writes the status
+  disk.desc[idx[2]].flags = VRING_DESC_F_WRITE;
   disk.desc[idx[2]].next = 0;
 
-  // record struct buf for virtio_disk_intr().
-  b->disk = 1;
   disk.info[idx[0]].b = b;
-
-  // tell the device the first index in our chain of descriptors.
   disk.avail->ring[disk.avail->idx % NUM] = idx[0];
-
   __sync_synchronize();
-
-  // tell the device another avail ring entry is available.
-  disk.avail->idx += 1; // not % NUM ...
-
+  disk.avail->idx += 1;
   __sync_synchronize();
-
-  *R(VIRTIO_MMIO_QUEUE_NOTIFY) = 0; // value is queue number
-
-  // Wait for virtio_disk_intr() to say request has finished.
-  while(b->disk == 1) {
-    sleep(b, &disk.vdisk_lock);
+  *R(VIRTIO_MMIO_QUEUE_NOTIFY) = 0;
+  
+  // latency calc
+  struct proc *p = myproc();
+  if (p) {
+    int C = 10;
+    int dist = (b->blockno > current_block) ? (b->blockno - current_block) : (current_block - b->blockno);
+    int latency = dist + C;
+    int total = p->disk_reads + p->disk_writes;
+    if (total > 0)
+      p->avg_disk_latency = (p->avg_disk_latency * (total - 1) + latency) / total;
+    else
+      p->avg_disk_latency = latency;
   }
-
-  disk.info[idx[0]].b = 0;
-  free_chain(idx[0]);
-
-  release(&disk.vdisk_lock);
+  current_block = b->blockno;
 }
+
 
 void
 virtio_disk_intr()
@@ -317,7 +388,11 @@ virtio_disk_intr()
       panic("virtio_disk_intr status");
 
     struct buf *b = disk.info[id].b;
-    b->disk = 0;   // disk is done with buf
+    b->disk = 0;
+    disk.info[id].b = 0;
+    free_chain(id);
+    in_flight = 0;
+    virtio_disk_issue();
     wakeup(b);
 
     disk.used_idx += 1;

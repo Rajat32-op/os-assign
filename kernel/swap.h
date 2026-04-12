@@ -13,7 +13,7 @@ struct swap_slot {
 }; 
 
 extern struct swap_slot swap_table[NSWAP];
-extern char swap_data[NSWAP][PGSIZE];
+// extern char swap_data[NSWAP][PGSIZE];
 extern struct spinlock  swap_lock;
 
 void  swapinit(void);

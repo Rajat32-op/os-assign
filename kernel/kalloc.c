@@ -54,6 +54,15 @@ freerange(void *pa_start, void *pa_end)
     kfree(p);
 }
 
+int tlb_flush_req[8]; // NCPU is 8 in param.h
+
+void tlb_shootdown(void) {
+  for (int i = 0; i < 8; i++) {
+    if (i != cpuid())
+      tlb_flush_req[i] = 1;
+  }
+}
+
 // Free the page of physical memory pointed at by pa,
 // which normally should have been returned by a
 // call to kalloc().  (The exception is when
@@ -209,7 +218,10 @@ uint64 clock_evict(void) {
 
     swap_write(slot, (char *)vpa);
     *pte = MAKE_SWAP_PTE(slot);
+    
     sfence_vma();
+    extern void tlb_shootdown(void); 
+    tlb_shootdown();
 
     vp->pages_evicted++;
     vp->pages_swapped_out++;

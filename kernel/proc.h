@@ -115,6 +115,9 @@ struct proc {
   int pages_swapped_in;
   int pages_swapped_out;
   int resident_pages;
+  int disk_reads;
+  int disk_writes;
+  int avg_disk_latency;
 };
 
 struct mlfqinfo{
@@ -130,4 +133,7 @@ struct vmstats {
     int pages_swapped_in;
     int pages_swapped_out;
     int resident_pages;
+    int disk_reads;
+    int disk_writes;
+    int avg_disk_latency;
 };

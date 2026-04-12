@@ -65,6 +65,43 @@ sys_sbrk(void)
   return addr;
 }
 
+extern int disk_sched_policy; // 0 for FCFS, 1 for SSTF
+
+uint64
+sys_setdisksched(void)
+{
+  int policy;
+  argint(0, &policy);
+  if(policy != 0 && policy != 1)
+    return -1;
+  disk_sched_policy = policy;
+  return 0;
+}
+
+extern int raid_policy;
+extern int failed_disk;
+
+uint64
+sys_setraid(void)
+{
+  int policy;
+  argint(0, &policy);
+  if(policy != 0 && policy != 1 && policy != 5)
+    return -1;
+  raid_policy = policy;
+  return 0;
+}
+
+uint64
+sys_faildisk(void)
+{
+  int disk;
+  argint(0, &disk);
+  if (disk < -1 || disk > 3) return -1;
+  failed_disk = disk;
+  return 0;
+}
+
 uint64
 sys_pause(void)
 {
@@ -224,6 +261,9 @@ uint64 sys_getvmstats(void) {
             info.pages_swapped_in=p->pages_swapped_in;
             info.pages_swapped_out=p->pages_swapped_out;
             info.resident_pages=p->resident_pages;
+            info.disk_reads = p->disk_reads;
+            info.disk_writes = p->disk_writes;
+            info.avg_disk_latency = p->avg_disk_latency;
             release(&p->lock);
             return copyout(myproc()->pagetable,addr,(char*)&info,sizeof(info));
         }

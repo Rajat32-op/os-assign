@@ -104,6 +104,12 @@ usertrap(void)
   uint64 satp = MAKE_SATP(p->pagetable);
 
   // return to trampoline.S; satp value in a0.
+  extern int tlb_flush_req[8];
+  if (tlb_flush_req[cpuid()]) {
+    sfence_vma();
+    tlb_flush_req[cpuid()] = 0;
+  }
+  
   return satp;
 }
 
@@ -173,6 +179,12 @@ kerneltrap()
   // so restore trap registers for use by kernelvec.S's sepc instruction.
   w_sepc(sepc);
   w_sstatus(sstatus);
+  
+  extern int tlb_flush_req[8];
+  if (tlb_flush_req[cpuid()]) {
+    sfence_vma();
+    tlb_flush_req[cpuid()] = 0;
+  }
 }
 
 void
