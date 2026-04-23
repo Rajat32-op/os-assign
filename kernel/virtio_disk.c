@@ -314,8 +314,7 @@ void virtio_disk_issue() {
     sleep(&disk.free[0], &disk.vdisk_lock);
   }
 
-  int write = b->_is_write; // We will assume 0 (read) here for simplicity if we can't tell, but actually we need it.
-  // Let's assume we can fetch write from somewhere, or we modify virtio_disk_rw above to pass the right thing.
+  int write = b->_is_write; 
   
   struct virtio_blk_req *buf0 = &disk.ops[idx[0]];
   buf0->type = write ? VIRTIO_BLK_T_OUT : VIRTIO_BLK_T_IN;
