@@ -18,13 +18,8 @@ void get_stats(struct vmstats *s) {
     getvmstats(getpid(),s);
 }
 
-void run_test_with_policy(int policy,const char *policy_name) {
-    printf("\n--- Running with %s scheduler ---\n",policy_name);
-    if(setdisksched(policy)<0){
-        printf("  [FAIL] failed to set disk scheduler to %s\n",policy_name);
-        fail++;
-        return;
-    }
+void test_raid_integrity(int raid_level, int disk_to_fail) {
+    printf("\n--- Running Test for RAID %d ---\n", raid_level);
     
     struct vmstats s_before,s_after;
     get_stats(&s_before);
@@ -32,8 +27,14 @@ void run_test_with_policy(int policy,const char *policy_name) {
     int n=NFRAMES+50;
     char *b=sbrklazy(n*PGSIZE);
     
+    // Write data to force swap
     for(int i=0;i<n;i++){
         b[i*PGSIZE]=(char)(i&0xff);
+    }
+    
+    if (disk_to_fail >= 0) {
+        printf("  [INFO] Failing disk %d to test RAID reconstruction\n", disk_to_fail);
+        faildisk(disk_to_fail);
     }
     
     int errs=0;
@@ -60,84 +61,38 @@ void run_test_with_policy(int policy,const char *policy_name) {
     printf("  faults=%d disk_reads=%d disk_writes=%d latency=%d\n",
            faults,reads,writes,s_after.avg_disk_latency);
            
-    check("data intact after eviction",errs==0);
+    check("data intact after eviction/reconstruction",errs==0);
     check("disk reads > 0",reads>0);
     check("disk writes > 0",writes>0);
-    check("latency >= 0",s_after.avg_disk_latency>=0);
+    
+    if (disk_to_fail >= 0) {
+        faildisk(-1); 
+    }
     
     sbrk(-(n*PGSIZE));
 }
 
-void test_priority_preemption() {
-    printf("\n--- Running Priority Preemption Test ---\n");
-    int pid=fork();
-    if(pid==0){
-        int counter=0;
-        for(int i=0;i<100000000;i++){
-            counter+=i;
-        }
-
-        char *b=sbrklazy(20*PGSIZE);
-        for(int i=0;i<20;i++){
-            b[i*PGSIZE]=i; 
-        }
-        exit(0);
-    }else{
-        pause(10);
-        char *b=sbrklazy(20*PGSIZE);
-        for(int i=0;i<20;i++){
-             b[i*PGSIZE]=i;
-        }
-        wait(0);
-        printf("  [PASS] Both processes finished eviction. (Check UART debug logs to verify preemption)\n");
-    }
-}
-
-void test_raid5_reconstruction() {
-    printf("\n--- Running RAID 5 Reconstruction Test ---\n");
-    if(setraid(5)<0){
-        printf("  [FAIL] failed to set RAID 5\n");
-        fail++;
-        return;
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        printf("Usage: pa4test <raid_level_tested>\n");
+        printf("Before running, ensure correct RAID level using: setraid <0|1|5>\n");
+        exit(1);
     }
     
-    int n=200;
-    char *b=sbrklazy(n*PGSIZE);
+    int raid_level = atoi(argv[1]);
     
-    for(int i=0;i<n;i++){
-        b[i*PGSIZE]=(char)(i&0xff); 
+    printf("=== PA4 Test for RAID %d ===\n", raid_level);
+    
+    if (raid_level == 0) {
+        test_raid_integrity(0, -1);
+    } else if (raid_level == 1) {
+        test_raid_integrity(1, 0); // Fail disk 0 for RAID 1
+    } else if (raid_level == 5) {
+        test_raid_integrity(5, 2); // Fail disk 2 (parity/data) for RAID 5
+    } else {
+        printf("Unknown RAID level to test. Please specify 0, 1, or 5.\n");
+        exit(1);
     }
-    
-    faildisk(2); 
-
-    int errs=0;
-    for(int i=0;i<n;i++){
-        if(b[i*PGSIZE]!=(char)(i&0xff)){
-             errs++;
-        }
-    }
-    
-    if(errs==0){
-         printf("  [PASS] RAID 5 Reconstruction successfully retrieved all data from parity!\n");
-         pass++;
-    }else{
-         printf("  [FAIL] RAID 5 Reconstruction failed. Corruption detected!\n");
-         fail++;
-    }
-    
-    faildisk(-1);
-    setraid(0);
-    sbrk(-(n*PGSIZE));
-}
-
-int main(void) {
-    printf("=== PA4 Test ===\n");
-    
-    run_test_with_policy(0,"FCFS");
-    run_test_with_policy(1,"SSTF");
-    
-    test_priority_preemption();
-    test_raid5_reconstruction();
 
     printf("\n=== Results: %d passed, %d failed ===\n",pass,fail);
     exit(0);

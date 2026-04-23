@@ -483,10 +483,10 @@ vmfault(pagetable_t pagetable, uint64 va, int read)
         while (frames_full()) {
             if(clock_evict() == 0) break;
         }
-        if (frames_full()) return 0;
+        if (frames_full()) { printf("vmfault frames_full fail\n"); return 0; }
 
         char *mem=kalloc();
-        if (mem == 0) return 0;
+        if (mem == 0) { printf("vmfault kalloc fail\n"); return 0; }
         swap_read(slot, mem);
         swap_free(slot);
 
@@ -505,10 +505,10 @@ vmfault(pagetable_t pagetable, uint64 va, int read)
     while (frames_full()) {
         if(clock_evict() == 0) break;
     }
-    if (frames_full()) return 0;
+    if (frames_full()) { printf("vmfault frames_full fail\n"); return 0; }
 
     char *mem = kalloc();
-    if (mem == 0) return 0;
+    if (mem == 0) { printf("vmfault kalloc fail\n"); return 0; }
 
     memset(mem, 0, PGSIZE);
     if (mappages(p->pagetable, va, PGSIZE, (uint64)mem,PTE_W | PTE_U | PTE_R) != 0) {

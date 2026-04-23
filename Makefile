@@ -163,6 +163,10 @@ UPROGS=\
 	$U/_pa2_3\
 	$U/_pa3test\
 	$U/_pa4test\
+	$U/_testraid0\
+	$U/_testraid1\
+	$U/_testraid5\
+	$U/_setraid\
 	$U/_pa3_1\
 	$U/_pa3_2\
 	$U/_pa3_3\
