@@ -214,11 +214,18 @@ uint64 clock_evict(void) {
     if (pte == 0 || !(*pte & PTE_V)) return 0;
 
     int slot = swap_alloc(vp->pid, vva);
-    if (slot < 0) panic("clock_evict: swap full");
-
+    if (slot < 0) {
+        acquire(&frame_lock);
+        frame_table[best].in_use = 1;
+        nframes_used++;
+        release(&frame_lock);
+        return 0;
+    }
     swap_write(slot, (char *)vpa);
     *pte = MAKE_SWAP_PTE(slot);
     
+    // sfence.vma only flushes the local CPU's TLB.
+    // To flush all CPUs, we increment a global version variable that every CPU checks.
     sfence_vma();
     extern void tlb_shootdown(void); 
     tlb_shootdown();

@@ -230,6 +230,13 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
 
   oldsz = PGROUNDUP(oldsz);
   for(a = oldsz; a < newsz; a += PGSIZE){
+    while(frames_full()) {
+        if(clock_evict() == 0) break;
+    }
+    if(frames_full()) {
+      uvmdealloc(pagetable, a, oldsz);
+      return 0;
+    }
     mem = kalloc();
     if(mem == 0){
       uvmdealloc(pagetable, a, oldsz);
@@ -240,6 +247,11 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
       kfree(mem);
       uvmdealloc(pagetable, a, oldsz);
       return 0;
+    }
+    struct proc *p = myproc();
+    if(p) {
+        frame_add(p, a, (uint64)mem);
+        p->resident_pages++;
     }
   }
   return newsz;
@@ -314,6 +326,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       continue;   // physical page hasn't been allocated
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
+    while(frames_full()) clock_evict();
     if((mem = kalloc()) == 0)
       goto err;
     memmove(mem, (char*)pa, PGSIZE);
@@ -467,7 +480,10 @@ vmfault(pagetable_t pagetable, uint64 va, int read)
     if (pte != 0 && !(*pte & PTE_V) && (*pte & PTE_SWAP)) {
         int slot=PTE_SWAP_SLOT(*pte);
 
-        while (frames_full())clock_evict();
+        while (frames_full()) {
+            if(clock_evict() == 0) break;
+        }
+        if (frames_full()) return 0;
 
         char *mem=kalloc();
         if (mem == 0) return 0;
@@ -486,7 +502,10 @@ vmfault(pagetable_t pagetable, uint64 va, int read)
 
     if (ismapped(pagetable, va))return 0;
 
-    while (frames_full())clock_evict();
+    while (frames_full()) {
+        if(clock_evict() == 0) break;
+    }
+    if (frames_full()) return 0;
 
     char *mem = kalloc();
     if (mem == 0) return 0;
